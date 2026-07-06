@@ -272,9 +272,7 @@ docker compose up --build
 
 ## Things to know before running this for real
 
-- The ATS side is unchanged and still needs its ONNX models
-  (GLiNER/BGE-M3/reranker) present on the host — this integration doesn't
-  touch that requirement.
+
 - `WHISPER_DEVICE` defaults to `cpu` here so the stack runs without a GPU.
   Set it to `gpu`/`cuda` only if the host has one and the container image
   has the matching CUDA/ctranslate2 runtime — the upstream `python:3.11-slim`
