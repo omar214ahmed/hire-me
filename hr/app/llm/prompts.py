@@ -1,10 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from langchain.prompts import PromptTemplate
-from schemas import EvaluationSchema, QuestionSchema, ClassificationSchema
-
-
-question_parser = PydanticOutputParser(pydantic_object=QuestionSchema)
+from schemas import EvaluationSchema #despi
 
 question_prompt = ChatPromptTemplate.from_template("""
 You are a senior technical interviewer.  
@@ -31,11 +28,13 @@ Skills:
 Previous questions (DO NOT repeat these):
 {previous_questions}
 
-{format_instructions}
-""").partial(format_instructions=question_parser.get_format_instructions())
+Return ONLY valid JSON:
 
+{{
+  "question": "..."
+}}
+""")
 
-classification_parser = PydanticOutputParser(pydantic_object=ClassificationSchema)
 
 classification_prompt = ChatPromptTemplate.from_template("""
 You are an interview question classifier.
@@ -55,11 +54,16 @@ Rules:
 Question:
 {question}
 
-{format_instructions}
-""").partial(format_instructions=classification_parser.get_format_instructions())
+Return ONLY valid JSON with one of these exact values:
+{{"category": "technical"}}
+{{"category": "problem_solving"}}
+{{"category": "behavioral"}}
+""")
 
 
-
+from langchain_core.prompts import PromptTemplate
+from langchain_core.output_parsers import PydanticOutputParser
+from schemas import EvaluationSchema
 
 template_message = """
 You are an expert technical interviewer.

@@ -11,6 +11,7 @@ class QuestionsGenerator:
     def generate(self, role: str, description: str, previous_questions: list[str] | None = None) -> str:
         prev_qs = previous_questions or []
         prev_text = "\n".join(f"- {q}" for q in prev_qs) if prev_qs else "None"
+        logger.info("Previous questions fed to prompt:\n%s", prev_text)
 
         logger.info(
             "Generating question for role='%s' | description='%s' | previous_questions=%d",
@@ -23,6 +24,8 @@ class QuestionsGenerator:
             "description": description,
             "previous_questions": prev_text
         })
+
+        
 
         elapsed = time.perf_counter() - start
         threshold_warn = 120.0
@@ -41,4 +44,13 @@ class QuestionsGenerator:
             logger.warning("LLM returned None; using fallback question for role='%s'", role)
             return f"As a {role} candidate, tell me about your experience with {description}."
 
-        return result.question
+        new_question = result.question.strip()
+        prev_lower = [q.strip().lower() for q in prev_qs]
+        if new_question.lower() in prev_lower:
+            logger.warning(
+                "LLM returned a duplicate question for role='%s'; using fallback",
+                role,
+            )
+            return f"As a {role} candidate, tell me about your experience with {description}."
+
+        return new_question

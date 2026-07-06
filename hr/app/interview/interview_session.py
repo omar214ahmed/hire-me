@@ -103,9 +103,15 @@ class InterviewSession:
             category=self.current_category,
             answer=transcript
             )
+
+        question_snapshot = self.current_question
+        category_snapshot = self.current_category
+        self.current_question = None
+        self.current_category = None
+
         return {
-            "question": self.current_question,
-            "category": self.current_category,
+            "question": question_snapshot,
+            "category": category_snapshot,
             "transcript": transcript,
             "evaluation": evaluation.model_dump()
         }

@@ -16,6 +16,7 @@ const state = {
   session: null,       // { id, role, skills, job_id }
   currentQuestion: null, // { question, category }
   history: [],          // list of AnswerResponse-shaped objects
+  awaitingAnswer: false, // true when a question is active but not yet answered
   recorder: null,
   recordedChunks: [],
   recordingSeconds: 0,
@@ -214,12 +215,17 @@ function resetToStart() {
 
 el('genQuestionBtn').addEventListener('click', async () => {
   clearError();
+  if (state.awaitingAnswer) {
+    showError('Answer the current question before generating a new one.');
+    return;
+  }
   el('genQuestionBtn').disabled = true;
   el('genQuestionBtn').textContent = 'Generating…';
   el('questionArea').innerHTML = '<div class="question-placeholder">Generating question via the local LLM — this can take a few seconds…</div>';
   try {
     const q = await apiCall(`${state.hrBase}/sessions/${state.session.id}/questions`, { method: 'POST' });
     state.currentQuestion = q;
+    state.awaitingAnswer = true;
     renderQuestion(q);
     disableRecorder(false);
   } catch (e) {
@@ -347,6 +353,7 @@ async function submitAnswer(fileLike, filename) {
       method: 'POST',
       body: form,
     });
+    state.awaitingAnswer = false;
     state.history.unshift(result);
     renderHistory();
     el('evalStatus').innerHTML = '';
