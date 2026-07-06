@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HireMe · Interview Console</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap');
+
+  :root{
+    --bg:#0b0a0e;
+    --surface:#141219;
+    --surface-alt:#181521;
+    --border:#2a2733;
+    --border-soft:#201d27;
+    --text:#efeaf5;
+    --text-dim:#9a95a8;
+    --text-faint:#655f72;
+    --accent:#e8a33d;
+    --accent-soft:#f0b862;
+    --accent-dim:#4d3a1a;
+    --violet:#9b8cff;
+    --violet-dim:#2d2952;
+    --good:#6fd88f;
+    --good-dim:#1f3d29;
+    --warn:#eab54e;
+    --warn-dim:#4d3f1f;
+    --danger:#e5695c;
+    --danger-dim:#4a2420;
+    --mono:'IBM Plex Mono', ui-monospace, monospace;
+    --sans:'IBM Plex Sans', system-ui, sans-serif;
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background:
+      radial-gradient(circle at 85% 0%, #1c1522 0%, transparent 45%),
+      radial-gradient(circle at 10% 100%, #16141c 0%, transparent 50%),
+      var(--bg);
+    color:var(--text);
+    font-family:var(--sans);
+    min-height:100vh;
+    line-height:1.5;
+  }
+  ::selection{ background:var(--accent-dim); color:var(--accent-soft); }
+  a{ color:var(--accent); }
+
+  .shell{ max-width:920px; margin:0 auto; padding:28px 20px 90px; }
+
+  /* ---------- header ---------- */
+  header.top{
+    display:flex; align-items:center; justify-content:space-between;
+    gap:16px; margin-bottom:24px; flex-wrap:wrap;
+  }
+  .brand{ display:flex; align-items:baseline; gap:10px; }
+  .brand .mark{
+    font-family:var(--mono); font-weight:700; font-size:13px; letter-spacing:.08em;
+    color:var(--accent); border:1px solid var(--accent-dim);
+    background:rgba(232,163,61,.08); padding:3px 7px; border-radius:4px;
+  }
+  .brand h1{ font-size:17px; font-weight:600; margin:0; letter-spacing:.01em; }
+  .brand .sub{ font-family:var(--mono); font-size:11.5px; color:var(--text-faint); }
+
+  .api-config{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .api-field{ display:flex; align-items:center; gap:6px; font-family:var(--mono); font-size:11.5px; color:var(--text-faint); }
+  .api-field input{
+    background:var(--surface); border:1px solid var(--border); color:var(--text-dim);
+    font-family:var(--mono); font-size:11.5px; padding:5px 8px; border-radius:5px; width:168px;
+  }
+  .api-field input:focus{ outline:none; border-color:var(--accent); color:var(--text); }
+  .dot{ width:7px; height:7px; border-radius:50%; background:var(--text-faint); flex:none; }
+  .dot.ok{ background:var(--good); box-shadow:0 0 6px var(--good); }
+  .dot.bad{ background:var(--danger); box-shadow:0 0 6px var(--danger); }
+
+  /* ---------- shared card ---------- */
+  .card{
+    background:var(--surface); border:1px solid var(--border-soft);
+    border-radius:12px; padding:20px 22px; margin-bottom:18px;
+  }
+  .card h2{
+    font-size:13px; font-family:var(--mono); letter-spacing:.06em; text-transform:uppercase;
+    color:var(--text-dim); margin:0 0 16px; display:flex; align-items:center; gap:8px;
+  }
+  .card h2 .n{
+    display:inline-flex; align-items:center; justify-content:center;
+    width:18px; height:18px; border-radius:50%; background:var(--accent-dim); color:var(--accent-soft);
+    font-size:10.5px; font-weight:700;
+  }
+
+  .row{ display:flex; gap:12px; flex-wrap:wrap; }
+  label.field{ display:flex; flex-direction:column; gap:6px; flex:1; min-width:180px; }
+  label.field span{ font-size:11.5px; color:var(--text-faint); font-family:var(--mono); }
+  input[type=text], textarea{
+    background:var(--surface-alt); border:1px solid var(--border); color:var(--text);
+    font-family:var(--sans); font-size:13.5px; padding:9px 11px; border-radius:8px; width:100%;
+  }
+  textarea{ resize:vertical; min-height:56px; font-family:var(--sans); }
+  input[type=text]:focus, textarea:focus{ outline:none; border-color:var(--accent); }
+
+  button{
+    font-family:var(--sans); font-weight:600; font-size:13px; border-radius:8px;
+    border:1px solid var(--border); background:var(--surface-alt); color:var(--text);
+    padding:9px 16px; cursor:pointer; transition:border-color .15s, transform .05s;
+  }
+  button:hover{ border-color:var(--text-faint); }
+  button:active{ transform:scale(.98); }
+  button:disabled{ opacity:.45; cursor:not-allowed; }
+  button.primary{ background:var(--accent); border-color:var(--accent); color:#1a1305; }
+  button.primary:hover{ background:var(--accent-soft); border-color:var(--accent-soft); }
+  button.ghost{ background:transparent; }
+  button.danger{ border-color:var(--danger-dim); color:var(--danger); background:transparent; }
+  button.danger:hover{ border-color:var(--danger); }
+  button.violet{ background:var(--violet); border-color:var(--violet); color:#150f36; }
+  button.violet:hover{ background:#ab9fff; }
+
+  .tabs{ display:flex; gap:6px; margin-bottom:16px; }
+  .tab{
+    font-family:var(--mono); font-size:12px; padding:7px 13px; border-radius:7px;
+    border:1px solid var(--border); color:var(--text-faint); cursor:pointer; background:var(--surface-alt);
+  }
+  .tab.active{ color:var(--accent-soft); border-color:var(--accent-dim); background:rgba(232,163,61,.08); }
+
+  .chip{
+    display:inline-flex; align-items:center; gap:4px; font-family:var(--mono); font-size:11.5px;
+    padding:3px 9px; border-radius:20px; border:1px solid var(--border); color:var(--text-dim);
+    background:var(--surface-alt);
+  }
+  .chip.job{ border-color:var(--violet-dim); color:var(--violet); background:rgba(155,140,255,.08); }
+  .chip.cat-technical{ border-color:#2d4a52; color:#6fc9d8; background:rgba(111,201,216,.08); }
+  .chip.cat-problem_solving{ border-color:var(--warn-dim); color:var(--warn); background:rgba(234,181,78,.08); }
+  .chip.cat-behavioral{ border-color:var(--good-dim); color:var(--good); background:rgba(111,216,143,.08); }
+
+  .hint{ font-size:12px; color:var(--text-faint); margin-top:6px; }
+  .error-banner{
+    border:1px solid var(--danger-dim); background:rgba(229,105,92,.08); color:var(--danger);
+    border-radius:8px; padding:10px 13px; font-size:13px; margin-bottom:14px; display:none;
+  }
+  .error-banner.show{ display:block; }
+
+  .job-preview{
+    border:1px dashed var(--border); border-radius:9px; padding:13px 15px; margin-top:12px; display:none;
+  }
+  .job-preview.show{ display:block; }
+  .job-preview .title{ font-weight:600; font-size:14px; margin-bottom:8px; }
+  .job-preview .skills{ display:flex; gap:6px; flex-wrap:wrap; }
+
+  #startPanel{ display:block; }
+  #interviewPanel{ display:none; }
+
+  /* session strip */
+  .session-strip{
+    display:flex; align-items:center; justify-content:space-between; gap:14px;
+    flex-wrap:wrap; margin-bottom:18px;
+  }
+  .session-info{ display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+  .session-info .role{ font-size:15px; font-weight:600; }
+  .session-info .sid{ font-family:var(--mono); font-size:11px; color:var(--text-faint); }
+
+  /* question card */
+  .question-card{ position:relative; }
+  .question-text{ font-size:16.5px; line-height:1.55; margin:12px 0 14px; }
+  .question-placeholder{ color:var(--text-faint); font-size:13.5px; }
+
+  /* recorder */
+  .recorder{ display:flex; align-items:center; gap:14px; flex-wrap:wrap; margin-top:6px; }
+  .rec-btn{
+    width:52px; height:52px; border-radius:50%; border:2px solid var(--danger-dim);
+    background:var(--surface-alt); display:flex; align-items:center; justify-content:center;
+    cursor:pointer; flex:none; transition:border-color .15s;
+  }
+  .rec-btn .sq{ width:16px; height:16px; border-radius:50%; background:var(--danger); transition:.15s; }
+  .rec-btn.recording{ border-color:var(--danger); animation:pulse 1.4s infinite; }
+  .rec-btn.recording .sq{ border-radius:4px; }
+  @keyframes pulse{ 0%{box-shadow:0 0 0 0 rgba(229,105,92,.45);} 70%{box-shadow:0 0 0 10px rgba(229,105,92,0);} 100%{box-shadow:0 0 0 0 rgba(229,105,92,0);} }
+
+  .wave{ display:flex; align-items:center; gap:3px; height:32px; flex:1; min-width:120px; }
+  .wave .bar{ width:4px; border-radius:2px; background:var(--border); height:6px; transition:height .08s ease; }
+  .wave.live .bar{ background:var(--danger); }
+  .rec-time{ font-family:var(--mono); font-size:13px; color:var(--text-dim); min-width:42px; }
+
+  .upload-fallback{ font-size:12px; color:var(--text-faint); margin-top:10px; }
+  .upload-fallback label{ color:var(--accent); cursor:pointer; text-decoration:underline; }
+
+  .evaluating{ display:flex; align-items:center; gap:9px; color:var(--text-dim); font-size:13px; margin-top:10px; }
+  .spinner{ width:14px; height:14px; border-radius:50%; border:2px solid var(--border); border-top-color:var(--accent); animation:spin .7s linear infinite; }
+  @keyframes spin{ to{ transform:rotate(360deg); } }
+
+  /* result / history entries */
+  .result{
+    border:1px solid var(--border-soft); border-radius:10px; padding:14px 16px; margin-top:14px;
+    background:var(--surface-alt);
+  }
+  .result-head{ display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:8px; flex-wrap:wrap; }
+  .result-q{ font-size:13.5px; font-weight:600; flex:1; }
+  .score-ring{ flex:none; }
+  .score-num{ font-family:var(--mono); font-weight:700; font-size:13px; }
+  .transcript{
+    font-size:12.5px; color:var(--text-dim); border-left:2px solid var(--border); padding-left:10px; margin:8px 0;
+    font-style:italic;
+  }
+  .feedback{ font-size:13px; color:var(--text); }
+  .flag{
+    display:inline-flex; align-items:center; gap:6px; font-size:12.5px; color:var(--warn);
+    background:rgba(234,181,78,.08); border:1px solid var(--warn-dim); border-radius:7px; padding:8px 11px;
+  }
+
+  #historyList{ display:flex; flex-direction:column; gap:0; }
+  .history-empty{ color:var(--text-faint); font-size:13px; }
+
+  .footer-actions{ display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap; }
+
+  /* summary modal */
+  .modal-backdrop{
+    position:fixed; inset:0; background:rgba(5,4,7,.72); display:none;
+    align-items:flex-start; justify-content:center; padding:60px 16px; overflow:auto; z-index:50;
+  }
+  .modal-backdrop.show{ display:flex; }
+  .modal{
+    background:var(--surface); border:1px solid var(--border); border-radius:14px;
+    max-width:560px; width:100%; padding:26px 26px 22px;
+  }
+  .modal .close{ float:right; }
+  .final-score{ text-align:center; margin:6px 0 22px; }
+  .final-score .num{ font-family:var(--mono); font-size:44px; font-weight:700; color:var(--accent); }
+  .final-score .lbl{ font-size:12px; color:var(--text-faint); font-family:var(--mono); text-transform:uppercase; letter-spacing:.06em; }
+  .summary-meta{ display:flex; gap:22px; justify-content:center; margin-bottom:18px; font-size:12.5px; color:var(--text-dim); }
+  .summary-list .result{ margin-top:10px; }
+
+  footer.credit{ text-align:center; color:var(--text-faint); font-size:11.5px; margin-top:26px; font-family:var(--mono); }
+
+  @media (max-width:600px){
+    .api-field input{ width:120px; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header class="top">
+    <div class="brand">
+      <span class="mark">HR</span>
+      <h1>Interview Console</h1>
+      <span class="sub">— talks to the HR service, which talks to the ATS</span>
+    </div>
+    <div class="api-config">
+      <div class="api-field"><span class="dot" id="hrDot"></span> HR <input id="hrUrl" type="text" value="http://localhost:8001" spellcheck="false"></div>
+      <div class="api-field"><span class="dot" id="atsDot"></span> ATS <input id="atsUrl" type="text" value="http://localhost:8000" spellcheck="false"></div>
+    </div>
+  </header>
+
+  <div class="error-banner" id="globalError"></div>
+
+  <!-- ================= START PANEL ================= -->
+  <section id="startPanel">
+    <div class="card">
+      <h2><span class="n">1</span>Start an interview</h2>
+      <div class="tabs">
+        <div class="tab active" data-tab="job">From an ATS job</div>
+        <div class="tab" data-tab="manual">Manual role &amp; skills</div>
+      </div>
+
+      <div id="tab-job">
+        <div class="row">
+          <label class="field">
+            <span>ATS job id</span>
+            <input type="text" id="jobIdInput" placeholder="e.g. a1b2c3d4e5f6">
+          </label>
+          <div style="align-self:flex-end;">
+            <button id="lookupJobBtn" class="ghost">Look up job</button>
+          </div>
+        </div>
+        <div class="hint">This calls <code>GET {ATS}/api/v1/jobs/&#123;id&#125;/summary</code> — the same minimal view the HR service itself fetches. It only returns a job title and required hard skills, never the full JD record.</div>
+        <div class="job-preview" id="jobPreview">
+          <div class="title" id="jobPreviewTitle"></div>
+          <div class="skills" id="jobPreviewSkills"></div>
+        </div>
+        <div class="row" style="margin-top:14px;">
+          <button id="startFromJobBtn" class="primary" disabled>Start session from this job</button>
+        </div>
+      </div>
+
+      <div id="tab-manual" style="display:none;">
+        <div class="row">
+          <label class="field">
+            <span>Role</span>
+            <input type="text" id="manualRole" placeholder="e.g. Backend Engineer">
+          </label>
+          <label class="field">
+            <span>Skills (comma-separated)</span>
+            <input type="text" id="manualSkills" placeholder="e.g. Python, PostgreSQL, Docker">
+          </label>
+        </div>
+        <div class="hint">Calls <code>POST {HR}/sessions</code> directly — no ATS job involved, useful for ad-hoc interviews.</div>
+        <div class="row" style="margin-top:14px;">
+          <button id="startManualBtn" class="primary">Start manual session</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= INTERVIEW PANEL ================= -->
+  <section id="interviewPanel">
+
+    <div class="card session-strip">
+      <div class="session-info">
+        <span class="role" id="sessRole">—</span>
+        <span class="sid" id="sessId">—</span>
+        <span class="chip job" id="sessJobChip" style="display:none;"></span>
+      </div>
+      <div class="row" style="gap:8px;">
+        <button id="viewSkillsBtn" class="ghost">Skills</button>
+        <button id="endSessionBtn" class="danger">End session</button>
+      </div>
+    </div>
+    <div class="hint" id="sessSkillsLine" style="display:none; margin:-10px 0 18px;"></div>
+
+    <div class="card question-card">
+      <h2><span class="n">2</span>Current question</h2>
+      <div id="questionArea">
+        <div class="question-placeholder">No question generated yet.</div>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <button id="genQuestionBtn" class="violet">Generate question</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2><span class="n">3</span>Record the candidate's answer</h2>
+      <div class="recorder">
+        <div class="rec-btn" id="recBtn" title="Record answer"><div class="sq"></div></div>
+        <div class="wave" id="wave"></div>
+        <div class="rec-time" id="recTime">0:00</div>
+      </div>
+      <div class="upload-fallback">No microphone here? <label for="fileInput">upload an audio file</label> instead.
+        <input type="file" id="fileInput" accept="audio/*" style="display:none;">
+      </div>
+      <div id="evalStatus"></div>
+    </div>
+
+    <div class="card">
+      <h2><span class="n">4</span>Answer history</h2>
+      <div id="historyList"><div class="history-empty">No answers submitted yet.</div></div>
+    </div>
+
+    <div class="footer-actions">
+      <span class="hint" style="margin:0;">Generate as many questions as you like, then close out the interview.</span>
+      <button id="finishBtn" class="primary">End interview &amp; view summary</button>
+    </div>
+  </section>
+
+  <footer class="credit">hireme-platform · hr service (:8001) · does not talk to Postgres directly</footer>
+</div>
+
+<!-- Summary modal -->
+<div class="modal-backdrop" id="summaryModal">
+  <div class="modal">
+    <button class="close ghost" id="closeSummaryBtn">Close</button>
+    <h2 style="margin-top:6px;"><span class="n">✓</span>Interview summary</h2>
+    <div class="final-score">
+      <div class="num" id="finalScoreNum">—</div>
+      <div class="lbl">Final score</div>
+    </div>
+    <div class="summary-meta">
+      <span id="summaryTotal">0 questions asked</span>
+      <span id="summaryEvaluated">0 evaluated</span>
+    </div>
+    <div class="summary-list" id="summaryList"></div>
+  </div>
+</div>
+
+<script src="hr_console.js"></script>
+</body>
+</html>

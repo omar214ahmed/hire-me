@@ -1,0 +1,13 @@
+langchain==0.3.25
+langchain-core==0.3.63
+langchain-ollama==0.2.3
+faster-whisper==1.0.3
+pydantic-settings==2.4.0
+pydantic>=2.0
+fastapi==0.115.0
+uvicorn==0.30.0
+python-multipart==0.0.9
+
+# ATS microservice client (HR -> ATS REST API)
+httpx==0.27.2
+tenacity==8.5.0

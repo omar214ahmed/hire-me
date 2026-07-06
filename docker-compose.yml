@@ -1,0 +1,161 @@
+services:
+
+  # ---------------------------------------------------------------------
+  # ATS (Applicant Tracking System) — source of truth for job data
+  # ---------------------------------------------------------------------
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: hireme
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-changeme}
+      POSTGRES_DB: hireme
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Runs automatically (name order), only the first time the data
+      # volume is empty — creates the pgvector extension + jobs/candidates
+      # tables. No manual migration step needed.
+      - ./ats/app/migrations/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hireme -d hireme"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - hireme-net
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - hireme-net
+
+  ats:
+    build:
+      context: ./ats
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./ats/app/.env
+    environment:
+      DATABASE_URL: postgresql://hireme:${POSTGRES_PASSWORD:-changeme}@postgres:5432/hireme
+      REDIS_URL: redis://redis:6379/0
+      # hf_xet (the newer HF download backend) is known to stall
+      # indefinitely mid-transfer in many network environments; plain
+      # HTTP downloads are slower to start but don't hang.
+      HF_HUB_DISABLE_XET: "1"
+      GLINER_ONNX_DIR: /app/onnx_models/gliner
+      BGE_M3_ONNX_DIR: /app/onnx_models/bge-m3-int8
+      RERANKER_ONNX_DIR: /app/onnx_models/bge-reranker-int8
+    volumes:
+      # Your local ONNX exports, mounted read-only. Override the host side
+      # with ONNX_MODELS_DIR (repo-root .env) if your folder isn't at the
+      # default path.
+      - ${ONNX_MODELS_DIR:-/home/omar-ahmed/onnx_models}:/app/onnx_models:ro
+      - candidate_files:/app/files
+      # Persist downloaded HF model weights across rebuilds — without this,
+      # `docker compose build --no-cache` silently wipes several GB of
+      # already-downloaded models and forces a full re-download.
+      - hf_model_cache:/root/.cache/huggingface
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 60s
+    networks:
+      - hireme-net
+
+  ats-worker:
+    build:
+      context: ./ats
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    command: ["celery", "-A", "pipeline.celery_app", "worker", "--loglevel=info"]
+    env_file:
+      - ./ats/app/.env
+    environment:
+      DATABASE_URL: postgresql://hireme:${POSTGRES_PASSWORD:-changeme}@postgres:5432/hireme
+      REDIS_URL: redis://redis:6379/0
+      HF_HUB_DISABLE_XET: "1"
+      GLINER_ONNX_DIR: /app/onnx_models/gliner
+      BGE_M3_ONNX_DIR: /app/onnx_models/bge-m3-int8
+      RERANKER_ONNX_DIR: /app/onnx_models/bge-reranker-int8
+    volumes:
+      - ${ONNX_MODELS_DIR:-/home/omar-ahmed/onnx_models}:/app/onnx_models:ro
+      - candidate_files:/app/files
+      - hf_model_cache:/root/.cache/huggingface
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - hireme-net
+
+  # ---------------------------------------------------------------------
+  # Ollama — local LLM runtime used by the HR service to generate/evaluate
+  # interview questions. Not part of the ATS/HR split itself, just an
+  # HR-side runtime dependency that needs to be reachable in-network.
+  # ---------------------------------------------------------------------
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    networks:
+      - hireme-net
+
+  # ---------------------------------------------------------------------
+  # HR (Interview Question Generator) — never touches ATS's database;
+  # only ever talks to it over HTTP via ATS_API_URL.
+  # ---------------------------------------------------------------------
+  hr:
+    build:
+      context: ./hr
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    env_file:
+      - ./hr/app/.env
+    environment:
+      # Service name, not localhost — HR and ATS are different network
+      # namespaces even though they're on the same Docker network.
+      ATS_API_URL: http://ats:8000
+      LLM_OLLAMA_MODEL: ${LLM_OLLAMA_MODEL:-qwen2.5:3b}
+    depends_on:
+      ats:
+        condition: service_healthy
+      ollama:
+        condition: service_started
+    networks:
+      - hireme-net
+
+volumes:
+  postgres_data:
+  candidate_files:
+  hf_model_cache:
+  ollama_data:
+
+networks:
+  hireme-net:
+    driver: bridge
