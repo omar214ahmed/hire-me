@@ -1,4 +1,8 @@
-from langchain_core.prompts import ChatPromptTemplate, PromptTemplate
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import PydanticOutputParser
+from langchain.prompts import PromptTemplate
+from schemas import EvaluationSchema #despi
+
 
 question_prompt = ChatPromptTemplate.from_template("""
 You are a senior technical interviewer.  
@@ -58,6 +62,7 @@ Return ONLY valid JSON with one of these exact values:
 """)
 
 
+
 template_message = """
 You are an expert technical interviewer.
 
@@ -91,10 +96,18 @@ Important Rules:
 - If the answer is partially correct, score between 4 and 6.
 - Explain briefly why the score was assigned in the "feedback" field.
 - Only set "status" and "message" if the answer is empty, nonsensical, or cannot be evaluated. Otherwise leave them null.
-- Respond with a filled-in evaluation for THIS answer — never repeat the schema, field descriptions, or these instructions back.
+
+Output format:
+{format_instructions}
 """
+
+evaluation_parser = PydanticOutputParser(pydantic_object=EvaluationSchema)
 
 evaluation_prompt = PromptTemplate(
     template=template_message,
     input_variables=["question", "answer", "category"],
+    partial_variables={"format_instructions": evaluation_parser.get_format_instructions()},
 )
+
+
+
