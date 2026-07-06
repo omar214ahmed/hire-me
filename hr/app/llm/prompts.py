@@ -19,6 +19,7 @@ Rules:
 - Difficulty must be medium by default
 - Do NOT repeat or generate a question similar to any of the previous questions
 - Ask about concepts and understanding only, NOT about writing actual implementation code
+- Lean the question's angle toward this focus area for variety: {variety_hint}
 
 Role:
 {role}
@@ -108,6 +109,3 @@ evaluation_prompt = PromptTemplate(
     input_variables=["question", "answer", "category"],
     partial_variables={"format_instructions": evaluation_parser.get_format_instructions()},
 )
-
-
-
