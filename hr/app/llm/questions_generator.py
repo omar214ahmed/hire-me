@@ -55,8 +55,19 @@ class QuestionsGenerator:
                 elapsed, role,
             )
 
-        if result is None:
-            logger.warning("LLM returned None; using fallback question for role='%s'", role)
+        # With include_raw=True, `result` is now a dict:
+        # {"raw": <the raw AIMessage>, "parsed": <QuestionSchema | None>, "parsing_error": <Exception | None>}
+        parsed = result.get("parsed") if isinstance(result, dict) else result
+        raw = result.get("raw") if isinstance(result, dict) else None
+        parsing_error = result.get("parsing_error") if isinstance(result, dict) else None
+
+        if parsed is None:
+            raw_content = getattr(raw, "content", None)
+            raw_tool_calls = getattr(raw, "tool_calls", None)
+            logger.warning(
+                "LLM failed to produce a parseable question | role='%s' | parsing_error=%r | raw_content=%r | raw_tool_calls=%r",
+                role, parsing_error, raw_content, raw_tool_calls,
+            )
             return f"As a {role} candidate, tell me about your experience with {description}."
 
-        return result.question
+        return parsed.question

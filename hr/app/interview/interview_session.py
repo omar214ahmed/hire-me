@@ -82,6 +82,8 @@ class InterviewSession:
                 "category": self.current_category,
                 "transcript": "",
                 "evaluation": {
+                    "score": 0,
+                    "feedback": f"Audio transcription failed: {str(e)}",
                     "status": "error",
                     "message": f"Audio transcription failed: {str(e)}"
                 }
@@ -93,6 +95,8 @@ class InterviewSession:
                 "category": self.current_category,
                 "transcript": transcript,
                 "evaluation": {
+                    "score": 0,
+                    "feedback": "Answer was too short to evaluate.",
                     "status": "invalid_answer",
                     "message": "Answer too short"
                 }
@@ -135,6 +139,3 @@ class InterviewSession:
             "final_score": f"{final_score}/10",
             "results": results
         }
-    
-
-

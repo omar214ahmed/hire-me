@@ -185,6 +185,9 @@ async def submit_answer(session_id: str, request: Request, file: UploadFile = Fi
     if ev_score is None:
         logger.warning("Storing result with score=None, coercing to 0")
         result["evaluation"]["score"] = 0
+    if result.get("evaluation", {}).get("feedback") is None:
+        logger.warning("Storing result with feedback=None, coercing to empty message")
+        result["evaluation"]["feedback"] = result["evaluation"].get("message") or "No feedback available."
     entry["results"].append(result)
     ev = result.get("evaluation", {})
     return AnswerResponse(
