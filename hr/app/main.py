@@ -11,7 +11,7 @@ from integrations import ATSClient
 from llm.chains import Chains
 from llm.transcript import Transcript
 from llm.providers.faster_whisper_provider import WhisperLoader
-from llm.providers.ollama_provider import OllamaProvider
+from llm.providers.ollama_provider import OllamaProvider, OllamaEmbeddingsProvider
 
 
 setup_logger()
@@ -20,7 +20,8 @@ logger = logging.getLogger("hr_interview")
 settings = get_settings()
 
 llm_provider = OllamaProvider(settings)
-chains = Chains(llm_provider.get_llm())
+embeddings_provider = OllamaEmbeddingsProvider(settings)
+chains = Chains(llm_provider.get_llm(), embeddings_provider.get_embeddings())
 whisper = WhisperLoader(settings)
 transcript = Transcript(whisper)
 
@@ -53,6 +54,7 @@ app.state.sessions: dict = {}
 app.state.chains = chains
 app.state.transcript = transcript
 app.state.ats_client = ats_client
+app.state.settings = settings
 
 from routers.sessions import router
 app.include_router(router)

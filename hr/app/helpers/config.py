@@ -21,6 +21,21 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://ollama:11434"
 
     # -----------------------------
+    # Question generation (uniqueness/diversity guard)
+    # -----------------------------
+    # Dedicated embedding model used only to measure semantic similarity
+    # between generated questions (see llm/question_similarity.py). This is
+    # NOT the chat model above — pull it separately in the Ollama
+    # container: `ollama pull nomic-embed-text`.
+    EMBEDDING_MODEL: str = "nomic-embed-text"
+    # Cosine similarity (0-1) above which a newly generated question is
+    # considered a near-duplicate of one already asked in the session.
+    QUESTION_SIMILARITY_THRESHOLD: float = 0.86
+    # How many times to ask the LLM again for a given skill/angle slot
+    # before giving up and accepting the least-similar candidate seen.
+    QUESTION_MAX_GENERATION_ATTEMPTS: int = 3
+
+    # -----------------------------
     # ATS integration (microservice)
     # -----------------------------
     # Base URL of the ATS service. Inside Docker Compose this must be the

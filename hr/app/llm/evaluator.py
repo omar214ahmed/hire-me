@@ -19,19 +19,25 @@ class Evaluator:
             logger.error("LLM evaluation chain failed: %s", e)
             return EvaluationSchema(score=0, feedback="Evaluation chain error")
 
-        if result is None:
-            return EvaluationSchema(score=0, feedback="No result from evaluator")
+        # include_raw=True -> result is {"raw": ..., "parsed": ..., "parsing_error": ...},
+        # not the parsed EvaluationSchema directly.
+        parsed = result.get("parsed") if isinstance(result, dict) else result
+        raw = result.get("raw") if isinstance(result, dict) else None
+        parsing_error = result.get("parsing_error") if isinstance(result, dict) else None
 
-        if result.score is None:
+        if parsed is None:
+            raw_content = getattr(raw, "content", None)
+            logger.warning(
+                "LLM failed to produce a parseable evaluation | parsing_error=%r | raw_content=%r",
+                parsing_error, raw_content,
+            )
+            return EvaluationSchema(score=0, feedback="Incomplete evaluation returned")
+
+        if parsed.score is None:
             logger.warning("LLM returned evaluation with score=None")
             return EvaluationSchema(score=0, feedback="Incomplete evaluation returned")
 
         return EvaluationSchema(
-            score=result.score,
-            feedback=result.feedback
+            score=parsed.score,
+            feedback=parsed.feedback
         )
-
-
-
-
-        

@@ -26,9 +26,14 @@ def _new_session_entry(request: Request, role: str, skills: str, job_id: Optiona
     creation paths so both stay in sync."""
     store = _get_store(request)
     session_id = str(uuid4())
+    settings = request.app.state.settings
     session = InterviewSession(
         transcript=request.app.state.transcript,
-        generator=QuestionsGenerator(request.app.state.chains),
+        generator=QuestionsGenerator(
+            request.app.state.chains,
+            similarity_threshold=settings.QUESTION_SIMILARITY_THRESHOLD,
+            max_attempts=settings.QUESTION_MAX_GENERATION_ATTEMPTS,
+        ),
         classifier=ClassificationQuestion(request.app.state.chains),
         evaluator=Evaluator(request.app.state.chains),
     )

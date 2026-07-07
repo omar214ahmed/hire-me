@@ -1,33 +1,32 @@
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import PydanticOutputParser
-from langchain.prompts import PromptTemplate
-from schemas import EvaluationSchema #despi
 
 
 question_prompt = ChatPromptTemplate.from_template("""
-You are a senior technical interviewer.  
+You are a senior technical interviewer.
 
 Your task is to generate ONE high-quality interview question.
 
 Rules:
-- The question must match the given role and skills ONLY
+- The question must be about the specific skill given below, for the given role
 - Do NOT add explanations
 - Do NOT include multiple questions
 - Avoid generic questions
 - Avoid trivia or vague questions
 - The question must be realistic in a real interview setting
 - Difficulty must be medium by default
-- Do NOT repeat or generate a question similar to any of the previous questions
 - Ask about concepts and understanding only, NOT about writing actual implementation code
-- Lean the question's angle toward this focus area for variety: {variety_hint}
+- Frame the question around this angle: {variety_hint}
+- Do NOT repeat or closely resemble any of the recent questions listed below — if the
+  natural question for this angle would be too close to one of them, approach the skill
+  from a different, more specific sub-topic instead
 
 Role:
 {role}
 
-Skills:
+Skill to focus this question on:
 {description}
 
-Previous questions (DO NOT repeat these):
+Recently asked questions (avoid repeating these or their meaning):
 {previous_questions}
 
 Return ONLY valid JSON:
@@ -63,8 +62,7 @@ Return ONLY valid JSON with one of these exact values:
 """)
 
 
-
-template_message = """
+evaluation_prompt = ChatPromptTemplate.from_template("""
 You are an expert technical interviewer.
 
 Evaluate the candidate answer carefully.
@@ -98,14 +96,12 @@ Important Rules:
 - Explain briefly why the score was assigned in the "feedback" field.
 - Only set "status" and "message" if the answer is empty, nonsensical, or cannot be evaluated. Otherwise leave them null.
 
-Output format:
-{format_instructions}
-"""
+Return ONLY valid JSON in exactly this shape:
 
-evaluation_parser = PydanticOutputParser(pydantic_object=EvaluationSchema)
-
-evaluation_prompt = PromptTemplate(
-    template=template_message,
-    input_variables=["question", "answer", "category"],
-    partial_variables={"format_instructions": evaluation_parser.get_format_instructions()},
-)
+{{
+  "score": 0,
+  "feedback": "...",
+  "status": null,
+  "message": null
+}}
+""")
