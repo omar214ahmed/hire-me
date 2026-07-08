@@ -3,8 +3,8 @@
 HireMe is a two-service hiring platform made of two independent FastAPI microservices that only ever talk to each other over HTTP:
 
 ```
-┌─────────────────────┐        HTTP        ┌──────────────────────────┐
-│   ATS Service        │ <───────────────── │   HR Service              │
+┌───────────────────────┐        HTTP        ┌───────────────────────────┐
+│   ATS Service         │ <───────────────── │   HR Service              │
 │   (port 8000)         │  GET /jobs/{id}    │   (port 8001)             │
 │                       │      /summary      │                           │
 │  - Resume parsing     │ ─────────────────> │  - AI interview questions │
@@ -12,7 +12,7 @@ HireMe is a two-service hiring platform made of two independent FastAPI microser
 │  - Candidate ranking  │                    │  - LLM answer scoring     │
 │  - PostgreSQL+pgvector│                    │  - No direct DB access    │
 └──────────┬────────────┘                    └──────────┬────────────────┘
-           │                                              │
+           │                                            │
       PostgreSQL                                       Ollama
       (pgvector, HNSW)                             (chat + embedding models)
            │
