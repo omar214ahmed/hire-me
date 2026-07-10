@@ -148,7 +148,11 @@ or manually via `migrations/schema.sql` — see §5.
    soft skill, education degree, field of study, language, nice-to-have
    tool, location, job type).
 4. Entities are bucketed into canonical keys (see `LABEL_KEY_MAP` in
-   `jd_processor.py`).
+   `jd_processor.py`). A `benefits` bucket is populated separately and
+   deterministically (one entry per bullet under a "Benefits"/"Perks"
+   header) — GLiNER has no benefits label, and benefits aren't matched
+   against candidate CVs, so this is fallback-only, the same pattern
+   `job_type` already uses.
 5. `build_jd_query()` builds a short text string from the extracted
    fields plus the raw `requirements`/`skills` section text — this is
    what gets embedded.

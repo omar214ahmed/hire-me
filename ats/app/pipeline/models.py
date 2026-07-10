@@ -70,21 +70,38 @@ class ModelRegistry:
         if cls._ner_model is None:
             from gliner import GLiNER
 
-            if _settings.USE_ONNX:
-                print(f"Loading GLiNER (ONNX INT8) from {_settings.GLINER_ONNX_DIR} ...")
-                ensure_model_config_file(_settings.GLINER_ONNX_DIR)
-                cls._ner_model = GLiNER.from_pretrained(
-                    _settings.GLINER_ONNX_DIR,
-                    load_onnx_model=True,
-                    onnx_model_file=_settings.GLINER_ONNX_FILE,
-                    local_files_only=True,
-                )
-            else:
-                print("Loading GLiNER (torch)...")
-                cls._ner_model = GLiNER.from_pretrained(
-                    _settings.GLINER_MODEL,
-                    local_files_only=_settings.MODELS_LOCAL_ONLY,
-                )
+            try:
+                if _settings.USE_ONNX:
+                    print(f"Loading GLiNER (ONNX INT8) from {_settings.GLINER_ONNX_DIR} ...")
+                    ensure_model_config_file(_settings.GLINER_ONNX_DIR)
+                    cls._ner_model = GLiNER.from_pretrained(
+                        _settings.GLINER_ONNX_DIR,
+                        load_onnx_model=True,
+                        onnx_model_file=_settings.GLINER_ONNX_FILE,
+                        local_files_only=True,
+                    )
+                else:
+                    print("Loading GLiNER (torch)...")
+                    cls._ner_model = GLiNER.from_pretrained(
+                        _settings.GLINER_MODEL,
+                        local_files_only=_settings.MODELS_LOCAL_ONLY,
+                    )
+            except Exception as exc:
+                # Surface a clear, actionable message instead of a bare
+                # "file not found" three layers deep in the gliner/
+                # transformers internals - the #1 cause of this is
+                # USE_ONNX=True pointing at a GLINER_ONNX_DIR that
+                # doesn't exist on *this* machine (see helpers/config.py).
+                # Callers (pipeline/jd_processor.py's extract_from_jd_v2)
+                # catch this and fall back to the dependency-free keyword
+                # extractor rather than failing the whole request.
+                raise RuntimeError(
+                    "GLiNER model failed to load "
+                    f"(USE_ONNX={_settings.USE_ONNX}, "
+                    f"dir={_settings.GLINER_ONNX_DIR if _settings.USE_ONNX else _settings.GLINER_MODEL}). "
+                    "Check helpers/config.py's GLINER_ONNX_DIR/GLINER_MODEL "
+                    f"settings for this machine. Original error: {exc}"
+                ) from exc
         return cls._ner_model
 
     @classmethod

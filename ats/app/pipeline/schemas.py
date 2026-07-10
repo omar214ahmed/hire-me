@@ -7,6 +7,68 @@ class JobCreateRequest(BaseModel):
     description: str = Field(..., min_length=20, description="Raw job description text")
 
 
+class ExtractedField(BaseModel):
+    value: Optional[str] = None
+    confidence: float = 0.0
+
+
+class ExtractedListField(BaseModel):
+    value: List[str] = Field(default_factory=list)
+    confidence: float = 0.0
+
+
+class JDExtraction(BaseModel):
+    job_title: ExtractedField = Field(default_factory=ExtractedField)
+    years_experience: ExtractedField = Field(default_factory=ExtractedField)
+    hard_skills: ExtractedListField = Field(default_factory=ExtractedListField)
+    soft_skills: ExtractedListField = Field(default_factory=ExtractedListField)
+    nice_to_have_skills: ExtractedListField = Field(default_factory=ExtractedListField)
+    education_degree: ExtractedField = Field(default_factory=ExtractedField)
+    field_of_study: ExtractedField = Field(default_factory=ExtractedField)
+    languages: ExtractedListField = Field(default_factory=ExtractedListField)
+    work_location: ExtractedField = Field(default_factory=ExtractedField)
+    job_type: ExtractedField = Field(default_factory=ExtractedField)
+    benefits: ExtractedListField = Field(default_factory=ExtractedListField)
+
+    extraction_method: str = "unknown"
+    needs_review: bool = False
+    routing_reason: Optional[str] = None
+    schema_version: int = 1
+
+    def low_confidence_field_count(self, threshold: float) -> int:
+        count = 0
+        for field_name in (
+            "job_title", "years_experience", "education_degree",
+            "field_of_study", "work_location", "job_type",
+        ):
+            field: ExtractedField = getattr(self, field_name)
+            if field.value and field.confidence < threshold:
+                count += 1
+        for field_name in ("hard_skills", "soft_skills", "nice_to_have_skills", "languages", "benefits"):
+            list_field: ExtractedListField = getattr(self, field_name)
+            if list_field.value and list_field.confidence < threshold:
+                count += 1
+        return count
+
+    def to_legacy_dict(self) -> Dict[str, List[str]]:
+        def _one(field: ExtractedField) -> List[str]:
+            return [field.value] if field.value else []
+
+        return {
+            "required job title": _one(self.job_title),
+            "required years of experience": _one(self.years_experience),
+            "required hard skill": sorted(set(self.hard_skills.value)),
+            "required soft skill": sorted(set(self.soft_skills.value)),
+            "nice_to_have_skill": sorted(set(self.nice_to_have_skills.value)),
+            "required education degree": _one(self.education_degree),
+            "required field of study": _one(self.field_of_study),
+            "required spoken language": sorted(set(self.languages.value)),
+            "work_location": _one(self.work_location),
+            "job_type": _one(self.job_type),
+            "benefits": sorted(set(self.benefits.value)),
+        }
+
+
 class JobResponse(BaseModel):
     job_id: str
     extracted: Dict[str, List[str]]

@@ -121,7 +121,7 @@ def test_no_content_lost_across_repeated_skill_subheadings():
 def test_soft_skills_and_employment_metadata_dont_pollute_other_sections():
     sections = split_jd_sections(REAL_WORLD_JD)
 
-    assert "Communication, teamwork" in sections["skills"]
+    assert "Communication, teamwork" in sections["soft_skills"]
     assert "Full-time" in sections["job_meta"]
     assert "Mid-level" in sections["job_meta"]
     # Metadata shouldn't leak into hard requirements or experience text.

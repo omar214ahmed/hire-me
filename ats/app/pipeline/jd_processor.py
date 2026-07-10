@@ -6,170 +6,26 @@ Mirrors the notebook's `extract_from_jd`, but the labels are kept generic
 ("job title", "years of experience", ...) so the same module can be reused
 if you swap GLiNER models later.
 
-Before NER, the JD is split into sections using the *same section keys*
-as `cv_processor.split_cv_sections` (skills, experience, education,
-languages, summary) plus a JD-only "requirements" bucket — this is what
-lets `matcher.hard_match` compare "like with like" later, and lets GLiNER
-focus on the parts of the JD that actually contain requirements instead
-of boilerplate (company blurb, benefits, legal footer, ...).
+Sectioning (chunk -> classify -> merge) now lives in `jd_chunker.py` - see
+that module's docstring for why. This file re-exports `clean_jd_text` and
+`split_jd_sections` from there so nothing downstream (routers, tests) needs
+to change, and focuses purely on what happens AFTER sections exist: running
+GLiNER per section, deterministic fallbacks, and bucketing entities into the
+canonical output keys `matcher.hard_match` compares "like with like" on.
 """
 
-import html
+import logging
 import re
-import unicodedata
 from typing import Dict, List
 
 from pipeline.models import ModelRegistry
-
-# ---------------------------------------------------------------------------
-# JD text cleaning
-# ---------------------------------------------------------------------------
-# Deliberately kept in its own section, with its OWN regex constants, and
-# never merged into JD_SECTION_PATTERNS. JD_SECTION_PATTERNS is for header /
-# section-type detection (requirements vs skills vs ...); this block only
-# normalizes the raw text *before* that detection runs. Mixing the two would
-# mean every future "one more edge case" fix has to be threaded through the
-# header-matching alternations (like the "skills" pattern), which is exactly
-# what we want to avoid.
-#
-# Real-world JD payloads commonly arrive mangled in one of these ways:
-#   - Literal escape sequences as text: a client sends the string
-#     "Requirements\\n5+ years" (backslash + "n", two characters) instead of
-#     an actual newline, usually from double-encoding JSON or copy/pasting
-#     from a log/terminal. `text.split("\n")` in split_jd_sections then sees
-#     ZERO real line breaks and the entire JD collapses into one "header"
-#     bucket - no section ever gets detected.
-#   - Real "\r\n" / lone "\r" line endings (Windows-authored JDs).
-#   - Non-breaking spaces (\xa0), zero-width spaces/joiners, and BOM marks
-#     copy-pasted from Word/Google Docs/web pages.
-#   - HTML remnants (<br>, <p>, <li>, &nbsp;, &amp;, ...) when a JD was
-#     scraped or pasted from an HTML source instead of plain text.
-#   - Exotic bullet glyphs (•, ‣, ▪, ●, ▶, ✓, »...) that make an otherwise
-#     short header-like line fail to read as a header, or clutter content.
-#   - Runs of 3+ blank lines / repeated horizontal whitespace.
-_LITERAL_ESCAPE_PATTERN = re.compile(r"\\r\\n|\\n|\\r|\\t")
-_LITERAL_ESCAPE_MAP = {
-    r"\r\n": "\n",
-    r"\n": "\n",
-    r"\r": "\n",
-    r"\t": " ",
-}
-
-_HTML_BLOCK_BREAK_TAGS = re.compile(
-    r"</?\s*(br|p|div|li|ul|ol|tr|table|h[1-6])\s*/?\s*>", re.IGNORECASE
+from pipeline.jd_chunker import (
+    clean_jd_text,
+    split_jd_sections,
+    JD_SECTION_PATTERNS,
 )
-_HTML_ANY_TAG = re.compile(r"<[^>]+>")
 
-_BULLET_CHARS = re.compile(r"^[\s]*[•‣▪●◦▶○✓✔·∙–—*-]\s*")
-_ZERO_WIDTH_CHARS = re.compile(r"[\u200b\u200c\u200d\ufeff]")
-_MULTI_BLANK_LINES = re.compile(r"\n{3,}")
-_MULTI_SPACES = re.compile(r"[ \t]{2,}")
-
-
-def clean_jd_text(text: str) -> str:
-    """
-    Normalize a raw JD payload before it ever reaches split_jd_sections /
-    GLiNER. Idempotent (safe to call more than once) and safe on already
-    clean text.
-
-    Order matters:
-      1. Unescape HTML entities (&nbsp;, &amp;, ...) first, since some of
-         them decode INTO the raw whitespace characters step 2-4 clean up.
-      2. Convert literal backslash-escape sequences ("\\n", "\\r\\n", "\\t"
-         as literal text) into real newlines/spaces.
-      3. Turn HTML block-level tags into real newlines, then strip any
-         remaining tags.
-      4. Strip zero-width/BOM characters and normalize unicode whitespace
-         (NBSP, thin space, etc.) to a plain ASCII space.
-      5. Strip a single leading bullet glyph per line.
-      6. Collapse excess horizontal whitespace and blank lines.
-    """
-    if not text:
-        return text
-
-    cleaned = html.unescape(text)
-
-    def _replace_escape(match: "re.Match") -> str:
-        return _LITERAL_ESCAPE_MAP[match.group(0)]
-
-    cleaned = _LITERAL_ESCAPE_PATTERN.sub(_replace_escape, cleaned)
-
-    if "<" in cleaned and ">" in cleaned:
-        cleaned = _HTML_BLOCK_BREAK_TAGS.sub("\n", cleaned)
-        cleaned = _HTML_ANY_TAG.sub("", cleaned)
-
-    cleaned = _ZERO_WIDTH_CHARS.sub("", cleaned)
-    cleaned = "".join(
-        " " if unicodedata.category(ch) == "Zs" else ch for ch in cleaned
-    )
-
-    lines = cleaned.split("\n")
-    lines = [_BULLET_CHARS.sub("", line) for line in lines]
-    cleaned = "\n".join(lines)
-
-    cleaned = _MULTI_SPACES.sub(" ", cleaned)
-    cleaned = _MULTI_BLANK_LINES.sub("\n\n", cleaned)
-    lines = [line.strip() for line in cleaned.split("\n")]
-    cleaned = "\n".join(lines).strip()
-
-    return cleaned
-
-
-# Same category keys cv_processor.split_cv_sections uses, plus JD-only
-# buckets ("requirements", "nice_to_have", "job_meta") for headers that
-# don't map 1:1 to a CV section header.
-#
-# Dict ORDER matters: split_jd_sections tries patterns in insertion order
-# and stops at the first match, so more specific patterns are listed
-# before more general ones that could otherwise swallow them, e.g.:
-#   - "nice_to_have" before "requirements": "Preferred Qualifications"
-#     must resolve to nice_to_have, not get merged into hard requirements.
-#   - "job_meta" before "experience": "Experience Level" is a metadata
-#     field (seniority), not a "work experience / responsibilities" body.
-#
-# Each pattern also tolerates the qualifying words real JDs actually use
-# around a core noun ("Required Qualifications", "Minimum Qualifications",
-# "Technical Skills", "Soft Skills", ...) instead of requiring an exact
-# bare-word match, which was the main reason headers were falling through
-# unrecognized.
-JD_SECTION_PATTERNS = {
-    "nice_to_have": (
-        r"(?:preferred|desired|good[\s-]+to[\s-]+have|nice[\s-]+to[\s-]+have|"
-        r"bonus|pluses?|optional|extra)\s*"
-        r"(?:points?)?\s*"
-        r"(?:qualifications?|requirements?|skills?)?"
-    ),
-    "job_meta": (
-        r"employment\s+type|experience\s+level|seniority(\s+level)?|"
-        r"job\s+type|work\s+arrangement|work\s+mode|"
-        r"location|salary|compensation|benefits?|perks?"
-    ),
-    "requirements": (
-        r"(?:(?:required|minimum|must[\s-]have|essential|mandatory|basic|"
-        r"key|other|additional)\s+)?(?:requirements?|qualifications?)"
-        r"|what\s+you('ll)?\s+(need|bring)"
-        r"|must\s+have"
-    ),
-    "soft_skills": (
-        r"soft\s+skills?|interpersonal\s+skills?|personality\s+traits?"
-    ),
-    "experience": (
-        r"(work\s+)?experience|responsibilities|duties|"
-        r"what\s+you('ll)?\s+do|role\s+overview"
-    ),
-    "education": r"education(al\s+background)?|academic(\s+background)?|degrees?",
-    "skills": (
-        r"(?:technical|soft|hard|core|key|general)?\s*skills?"
-        r"|tech(nology)?\s+stack|tools?"
-        r"|programming(\s+languages?)?|libraries|frameworks?"
-        r"|data\s+analysis|machine\s+learning|artificial\s+intelligence"
-    ),
-    "languages": r"languages?|spoken\s+languages?",
-    "summary": (
-        r"summary|about\s+(the\s+role|us|the\s+company)|overview"
-        r"|what\s+you('ll)?\s+learn"
-    ),
-}
+logger = logging.getLogger(__name__)
 
 JD_LABELS = [
     "job title",
@@ -446,7 +302,6 @@ def _canonicalize_field_of_study(value: str) -> str:
         r"\bstatistics\b",
         r"\bmathematics\b",
         r"\bsoftware engineering\b",
-        r"\bai\b",
     ]:
         if re.search(pattern, lowered):
             return re.sub(r"\s+", " ", text).strip()
@@ -588,7 +443,6 @@ def _extract_field_of_study_fallback(sections: Dict[str, str]) -> List[str]:
         r"\bstatistics\b",
         r"\bmathematics\b",
         r"\bsoftware engineering\b",
-        r"\bai\b",
     ]:
         if re.search(pattern, text, re.I):
             studies.append(re.search(pattern, text, re.I).group(0).strip())
@@ -606,8 +460,31 @@ def _extract_job_type_fallback(sections: Dict[str, str]) -> List[str]:
     return []
 
 
+def _extract_benefits_fallback(sections: Dict[str, str]) -> List[str]:
+    """Benefits/perks aren't in GLiNER's label set at all (they're not
+    something a candidate's CV can be matched against), so this is the
+    only source of the "benefits" field - a plain, deterministic split
+    of the "benefits" section into one entry per bullet/line, cleaned up
+    the same light way as the other list fallbacks."""
+    text = sections.get("benefits", "")
+    if not text:
+        return []
+
+    values = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or len(line) > 200:
+            continue
+        line = re.sub(r"^[-•*]\s*", "", line)
+        cleaned = re.sub(r"\s+", " ", line).strip(" .")
+        if cleaned:
+            values.append(cleaned)
+    return sorted(set(values))
+
+
 def _bucket_entities(entities: List[Dict], ner_input: str, sections: Dict[str, str]) -> Dict[str, List[str]]:
     result = {key: [] for key in LABEL_KEY_MAP.values()}
+    result["benefits"] = []
     for entity in entities:
         key = LABEL_KEY_MAP.get(entity.get("label"))
         if not key:
@@ -652,53 +529,13 @@ def _bucket_entities(entities: List[Dict], ner_input: str, sections: Dict[str, s
     if not result["work_location"]:
         result["work_location"].extend(_extract_location_fallback(sections))
     result["job_type"].extend(_extract_job_type_fallback(sections))
+    if not result["benefits"]:
+        result["benefits"].extend(_extract_benefits_fallback(sections))
 
     for key in result:
         result[key] = sorted(set(result[key]))
 
     return result
-
-
-def split_jd_sections(text: str) -> Dict[str, str]:
-    """Same header-detection approach as cv_processor.split_cv_sections.
-
-    Runs `clean_jd_text` first so mangled input (literal "\\n" sequences,
-    HTML remnants, non-breaking spaces, stray bullets, ...) doesn't prevent
-    header detection below - see the "JD text cleaning" section above for
-    why that matters.
-
-    IMPORTANT (bug fix): real JDs frequently repeat headers that map to the
-    *same* canonical key at different points in the document (e.g. a
-    "Technical Skills" header followed later by a "Tools" sub-heading —
-    both map to "skills"). The original implementation did
-    `sections[current] = []` on every header match, which reset the list
-    and silently discarded everything collected under that key so far.
-    We now use `setdefault` so a repeated header appends to the existing
-    section instead of wiping it.
-    """
-    text = clean_jd_text(text)
-    lines = text.split("\n")
-    sections: Dict[str, List[str]] = {}
-    current = "header"
-    sections[current] = []
-
-    for line in lines:
-        stripped = line.strip()
-        matched = False
-        for section, pattern in JD_SECTION_PATTERNS.items():
-            header_match = re.match(r"^(" + pattern + r")\s*(?::\s*(.*))?$", stripped.lower())
-            if header_match and len(stripped) < 60:
-                current = section
-                sections.setdefault(current, [])
-                inline_content = header_match.group(2)
-                if inline_content and inline_content.strip():
-                    sections[current].append(inline_content.strip())
-                matched = True
-                break
-        if not matched:
-            sections[current].append(line)
-
-    return {k: "\n".join(v).strip() for k, v in sections.items()}
 
 
 def _ner_text(jd_text: str, sections: Dict[str, str]) -> str:
@@ -899,3 +736,222 @@ def build_jd_query(jd_extracted: Dict[str, List[str]], sections: Dict[str, str] 
             parts.append("Requirements: " + sections["skills"])
 
     return " | ".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Extraction v2: router (legacy vs. LLM) + confidence-gated structured output
+# ---------------------------------------------------------------------------
+# This is the new primary entry point. It does NOT replace the functions
+# above - extract_from_jd / extract_from_jd_with_sections stay exactly as
+# they are, both because existing callers/tests depend on their exact
+# shape and because they ARE still used, as the "legacy" arm of the
+# router, for JDs simple enough not to need an LLM call.
+from pipeline import jd_router
+from pipeline import jd_llm_extractor
+from pipeline import jd_keyword_extractor
+from pipeline.schemas import ExtractedField, ExtractedListField, JDExtraction
+
+
+def _legacy_dict_to_jd_extraction(
+    legacy_result: Dict[str, List[str]], routing_reason: str
+) -> JDExtraction:
+    """Wrap the existing extract_from_jd() output in the v2 structured
+    shape. Legacy extraction has no native confidence signal, so each
+    present value gets a flat, moderate confidence (0.6) - not 0.0 -
+    so a JD that legitimately routed to the cheap legacy path isn't
+    unfairly flagged needs_review just for using the cheaper path.
+    0.0 is reserved for "the LLM path ran and was genuinely unsure."""
+    def _field(key: str) -> ExtractedField:
+        values = legacy_result.get(key) or []
+        return ExtractedField(value=values[0] if values else None, confidence=0.6 if values else 0.0)
+
+    def _list_field(key: str) -> ExtractedListField:
+        values = legacy_result.get(key) or []
+        return ExtractedListField(value=list(values), confidence=0.6 if values else 0.0)
+
+    return JDExtraction(
+        job_title=_field("required job title"),
+        years_experience=_field("required years of experience"),
+        hard_skills=_list_field("required hard skill"),
+        soft_skills=_list_field("required soft skill"),
+        nice_to_have_skills=_list_field("nice_to_have_skill"),
+        education_degree=_field("required education degree"),
+        field_of_study=_field("required field of study"),
+        languages=_list_field("required spoken language"),
+        work_location=_field("work_location"),
+        job_type=_field("job_type"),
+        benefits=_list_field("benefits"),
+        extraction_method="legacy_regex",
+        routing_reason=routing_reason,
+    )
+
+
+_SCALAR_FIELD_NAMES = (
+    "job_title", "years_experience", "education_degree",
+    "field_of_study", "work_location", "job_type",
+)
+_LIST_FIELD_NAMES = (
+    "hard_skills", "soft_skills", "nice_to_have_skills", "languages", "benefits",
+)
+
+
+def _run_legacy_safely(jd_text: str, threshold: float, decision_reason: str):
+    """extract_from_jd() depends on the GLiNER model actually loading
+    (see pipeline/models.py + helpers/config.py's GLINER_ONNX_DIR) -
+    that can fail on any machine where the configured model path isn't
+    present. Previously this exception was never caught here, so a
+    misconfigured/missing model crashed the whole job-creation request
+    (500) instead of degrading gracefully. Returns (None, reason) on
+    failure so the caller can fall through to the keyword extractor
+    instead of failing the request."""
+    try:
+        legacy_result = extract_from_jd(jd_text, threshold=threshold)
+        return (
+            _legacy_dict_to_jd_extraction(legacy_result, routing_reason=decision_reason),
+            decision_reason,
+        )
+    except Exception as exc:
+        logger.warning("Legacy (GLiNER) JD extraction failed (%s); falling back further", exc)
+        return None, f"{decision_reason}; legacy path failed ({exc})"
+
+
+def _merge_with_keyword_fallback(result, jd_text: str, reason: str) -> JDExtraction:
+    """Layer the dependency-free keyword extractor (pipeline/
+    jd_keyword_extractor.py) on top of whatever the primary path
+    produced: fills any scalar field that came back empty, and unions
+    any list field, instead of shipping a result that's emptier than
+    plain keyword matching against the JD's own text would be. This is
+    what actually fixes JDs that route to the LLM path (unavailable, no
+    API key) and then also hit a GLiNER load/predict failure - without
+    this, such a JD would previously come back with every field
+    "none detected" even when the information is plainly in the text.
+
+    Cheap and dependency-free (pure regex), so it's safe to always run,
+    not just when the primary path fails outright.
+    """
+    keyword_result = jd_keyword_extractor.extract_from_jd_keywords(jd_text)
+
+    if result is None:
+        keyword_result.routing_reason = f"{reason}; used keyword_fallback (primary paths unavailable)"
+        return keyword_result
+
+    filled_any = False
+    for name in _SCALAR_FIELD_NAMES:
+        primary_field: ExtractedField = getattr(result, name)
+        fallback_field: ExtractedField = getattr(keyword_result, name)
+        if not primary_field.value and fallback_field.value:
+            setattr(result, name, fallback_field)
+            filled_any = True
+
+    for name in _LIST_FIELD_NAMES:
+        primary_field: ExtractedListField = getattr(result, name)
+        fallback_field: ExtractedListField = getattr(keyword_result, name)
+        if fallback_field.value:
+            merged = sorted(set(primary_field.value) | set(fallback_field.value))
+            if merged != sorted(primary_field.value):
+                filled_any = True
+            setattr(result, name, ExtractedListField(
+                value=merged,
+                confidence=max(primary_field.confidence, fallback_field.confidence),
+            ))
+
+    if filled_any:
+        result.extraction_method = f"{result.extraction_method}+keyword_fallback"
+        result.routing_reason = f"{result.routing_reason or reason}; gaps filled by keyword_fallback"
+
+    return result
+
+
+def extract_from_jd_v2(jd_text: str, threshold: float = 0.3) -> JDExtraction:
+    """
+    Primary v2 entry point: routes each JD to the legacy pipeline or the
+    structured-output LLM pipeline (pipeline/jd_router.py), runs it, and
+    returns a confidence-scored JDExtraction.
+
+    Never raises for extraction-quality reasons:
+      - LLM path selected but unavailable (no API key) or fails outright
+        (network error, malformed response) -> falls back to the legacy
+        (GLiNER) path.
+      - Legacy path's GLiNER model fails to load/predict (e.g. a
+        misconfigured model path - see helpers/config.py) -> falls back
+        to the dependency-free keyword extractor.
+      - In every case, the dependency-free keyword extractor
+        (pipeline/jd_keyword_extractor.py) is also layered on top to
+        fill any field the primary path left empty, so a well-formed JD
+        never comes back with every field blank just because the ML
+        models/API happen to be unavailable in this deployment.
+
+    A JD that comes back with several low-confidence fields is flagged
+    needs_review instead of shipped silently as if it were fully
+    trustworthy.
+    """
+    settings = None
+    try:
+        from helpers.config import get_settings
+        settings = get_settings()
+    except Exception:
+        pass
+
+    mode = getattr(settings, "JD_EXTRACTION_MODE", "auto") if settings else "auto"
+    max_legacy_chars = getattr(settings, "JD_ROUTER_MAX_LEGACY_CHARS", 1500) if settings else 1500
+    min_headers = getattr(settings, "JD_ROUTER_MIN_RECOGNIZED_HEADERS", 2) if settings else 2
+    min_confidence = getattr(settings, "JD_MIN_CONFIDENCE", 0.5) if settings else 0.5
+    max_low_conf_fields = getattr(settings, "JD_MAX_LOW_CONFIDENCE_FIELDS_BEFORE_REVIEW", 2) if settings else 2
+
+    if mode == "legacy":
+        decision_path, decision_reason = "legacy", "JD_EXTRACTION_MODE=legacy (forced)"
+    elif mode == "llm":
+        decision_path, decision_reason = "llm", "JD_EXTRACTION_MODE=llm (forced)"
+    else:
+        decision = jd_router.choose_extraction_path(
+            jd_text,
+            max_legacy_chars=max_legacy_chars,
+            min_recognized_headers=min_headers,
+        )
+        decision_path, decision_reason = decision.path, decision.reason
+
+    result = None
+    reason = decision_reason
+
+    if decision_path == "llm":
+        try:
+            result = jd_llm_extractor.extract_from_jd_llm(jd_text)
+            result.routing_reason = decision_reason
+        except jd_llm_extractor.JDExtractionError as exc:
+            logger.warning("LLM JD extraction failed (%s); falling back to legacy path", exc)
+            reason = f"{decision_reason}; LLM path failed ({exc}), used legacy fallback"
+            result, reason = _run_legacy_safely(jd_text, threshold, reason)
+    else:
+        result, reason = _run_legacy_safely(jd_text, threshold, decision_reason)
+
+    result = _merge_with_keyword_fallback(result, jd_text, reason)
+
+    low_conf_count = result.low_confidence_field_count(min_confidence)
+    if low_conf_count > max_low_conf_fields or not result.job_title.value:
+        result.needs_review = True
+
+    return result
+
+
+def extract_from_jd_with_sections_v2(jd_text: str, threshold: float = 0.3) -> Dict:
+    """
+    v2 counterpart to extract_from_jd_with_sections: returns both the
+    structured JDExtraction (projected to the legacy flat shape via
+    to_legacy_dict(), for drop-in compatibility with storage/
+    build_jd_query/matcher) AND the full JDExtraction (with confidence +
+    needs_review) for anything that wants the richer v2 view - e.g. the
+    ATS console flagging JDs for human review.
+    """
+    jd_extraction = extract_from_jd_v2(jd_text, threshold=threshold)
+
+    # Sections are still useful for build_jd_query's raw-text embedding
+    # input regardless of which extraction path ran, so compute them the
+    # same (cheap, deterministic) way as before.
+    cleaned = clean_jd_text(jd_text)
+    sections = split_jd_sections(cleaned)
+
+    return {
+        "extracted": jd_extraction.to_legacy_dict(),
+        "sections": sections,
+        "jd_extraction": jd_extraction,
+    }

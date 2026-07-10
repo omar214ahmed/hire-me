@@ -32,5 +32,12 @@ sentencepiece
 asyncpg
 pgvector
 
+# JD extraction v2 (pipeline/jd_llm_extractor.py): structured-output LLM
+# path used by jd_router for JDs the legacy regex/GLiNER pipeline can't
+# reliably parse (emoji headers, inconsistent/missing sections, long
+# unstructured or non-English text). Lazily imported - not a hard
+# dependency for JD_EXTRACTION_MODE=legacy deployments.
+anthropic
+
 celery
 redis

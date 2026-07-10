@@ -28,8 +28,9 @@ async def create_job(payload: dict):
         )
 
     try:
-        jd_result = jd_processor.extract_from_jd_with_sections(description)
+        jd_result = jd_processor.extract_from_jd_with_sections_v2(description)
         jd_extracted = jd_result["extracted"]
+        jd_extraction = jd_result["jd_extraction"]  # confidence-scored JDExtraction
         jd_query = jd_processor.build_jd_query(jd_extracted, sections=jd_result["sections"])
     except Exception as e:
         return JSONResponse(
@@ -53,7 +54,17 @@ async def create_job(payload: dict):
             content={"signal": "JD_EMBEDDING_FAILED", "error": str(e)},
         )
 
-    job_id = await storage.save_job(description, jd_extracted, jd_query, jd_embedding)
+    # Full structured dump (incl. per-field confidence) - yes, this
+    # duplicates the flat values that are also in `extracted`, but a
+    # review dashboard needs the confidence sitting right next to each
+    # value, and jsonb storage of one extra small object per job is a
+    # trivial cost next to the value of not having to re-derive it.
+    extraction_meta = jd_extraction.model_dump()
+
+    job_id = await storage.save_job(
+        description, jd_extracted, jd_query, jd_embedding,
+        extraction_meta=extraction_meta,
+    )
 
     return JSONResponse(
         status_code=status.HTTP_201_CREATED,
@@ -62,6 +73,8 @@ async def create_job(payload: dict):
             "job_id": job_id,
             "extracted": jd_extracted,
             "query": jd_query,
+            "extraction_method": jd_extraction.extraction_method,
+            "needs_review": jd_extraction.needs_review,
         },
     )
 

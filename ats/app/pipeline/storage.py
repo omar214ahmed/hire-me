@@ -60,20 +60,31 @@ async def save_job(
     jd_extracted: Dict,
     jd_query: str,
     jd_embedding: Optional[list] = None,
+    extraction_meta: Optional[Dict] = None,
 ) -> str:
+    """
+    extraction_meta (optional): the confidence/provenance envelope from
+    extract_from_jd_v2 - typically `jd_extraction.model_dump()` from a
+    pipeline.schemas.JDExtraction, MINUS the flat values (those already
+    live in jd_extracted/`extracted`). Optional and defaults to None so
+    callers still on the legacy extract_from_jd_with_sections() (or any
+    external caller) keep working unchanged - this is additive, not a
+    breaking change to the function signature.
+    """
     job_id = uuid.uuid4().hex[:12]
     pool = await get_pool()
     async with pool.acquire() as conn:
         await conn.execute(
             """
-            INSERT INTO jobs (job_id, jd_text, extracted, query, jd_embedding, created_at)
-            VALUES ($1, $2, $3::jsonb, $4, $5::vector, $6)
+            INSERT INTO jobs (job_id, jd_text, extracted, query, jd_embedding, extraction_meta, created_at)
+            VALUES ($1, $2, $3::jsonb, $4, $5::vector, $6::jsonb, $7)
             """,
             job_id,
             jd_text,
             json.dumps(jd_extracted),
             jd_query,
             str(jd_embedding) if jd_embedding is not None else None,
+            json.dumps(extraction_meta) if extraction_meta is not None else None,
             datetime.now(timezone.utc),
         )
     return job_id
@@ -101,6 +112,8 @@ def _job_row_to_dict(row) -> Dict:
     d = dict(row)
     if isinstance(d.get("extracted"), str):
         d["extracted"] = json.loads(d["extracted"])
+    if isinstance(d.get("extraction_meta"), str):
+        d["extraction_meta"] = json.loads(d["extraction_meta"])
     if d.get("created_at"):
         d["created_at"] = d["created_at"].isoformat()
     d["jd_embedding"] = _parse_embedding(d.get("jd_embedding"))
